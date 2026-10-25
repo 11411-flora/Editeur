@@ -5,6 +5,9 @@ from typing import Literal
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+import os
+
+import blocage as blocage_mod
 import credit as credit_mod
 from doc import Document, dele, ins
 
@@ -13,6 +16,8 @@ app = FastAPI(title="Editeur de documents partage")
 # Un seul processus : cet etat est donc unique. (A remplacer par DynamoDB.)
 DOCUMENTS = {}
 CREDIT = credit_mod.creer()
+BLOCAGE = blocage_mod.creer()
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 
 class NouveauDocument(BaseModel):
@@ -97,6 +102,16 @@ def lire_document(doc_id: str, x_email: str = Header(default="")):
 def soumettre(doc_id: str, corps: Soumission, x_email: str = Header(default="")):
     email = _email(x_email)
     entree = _document(doc_id, email)
+
+    # 3a. deja bloque ? on repond tout de suite, sans toucher au credit
+    reste = BLOCAGE.reste(email)
+    if reste > 0:
+        raise HTTPException(
+            429,
+            detail={"erreur": "bloque", "reessayer_dans_s": int(reste) + 1},
+            headers={"Retry-After": str(int(reste) + 1)},
+        )
+
     o = corps.op
     if o.kind == "ins":
         if o.text == "":
@@ -116,6 +131,13 @@ def soumettre(doc_id: str, corps: Soumission, x_email: str = Header(default=""))
     if cout > 0:
         utilises = CREDIT.consommer(email, cout, jour)   # verifier ET retirer
         if utilises is None:
+            if BLOCAGE.enregistrer_refus(email):
+                reste = BLOCAGE.reste(email)
+                raise HTTPException(
+                    429,
+                    detail={"erreur": "bloque", "reessayer_dans_s": int(reste) + 1},
+                    headers={"Retry-After": str(int(reste) + 1)},
+                )
             restant = CREDIT.limite - CREDIT.utilises(email, jour)
             raise HTTPException(
                 429,
@@ -144,3 +166,10 @@ def lire_ops(doc_id: str, depuis: int = 0, x_email: str = Header(default="")):
     depuis = max(0, depuis)
     ops, version = entree["doc"].journal_depuis(depuis)
     return {"depuis": depuis, "version": version, "ops": [asdict(o) for o in ops]}
+
+
+@app.get("/admin/bloques")
+def admin_bloques(x_admin_token: str = Header(default="")):
+    if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(403, "Jeton d'administration invalide")
+    return {"bloques": BLOCAGE.liste()}

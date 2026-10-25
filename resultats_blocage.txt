@@ -1,0 +1,5 @@
+OK  5 refus en moins de 60 s : bloque 10 minutes
+OK  apres la duree, le redacteur est libre
+OK  des refus espaces ne bloquent personne
+OK  un autre redacteur n'est pas touche
+OK  A@x.fr et a@x.fr sont la meme personne

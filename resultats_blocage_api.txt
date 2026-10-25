@@ -1,0 +1,6 @@
+OK  4 refus de credit : toujours seulement 'credit_epuise'
+OK  5e refus : bloque, Retry-After = 600 s
+OK  pendant le blocage, l'ecriture reste refusee
+OK  lire reste possible
+OK  un autre redacteur peut ecrire
+OK  /admin/bloques liste la personne bloquee (et seulement elle)
