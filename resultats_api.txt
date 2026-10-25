@@ -1,0 +1,4 @@
+OK  acces refuses (401/403) et requetes invalides refusees (422)
+OK  scenario classique via l'API : ABXEF
+OK  200 redacteurs au meme endroit : aucune modification perdue
+duree : 0.4 s

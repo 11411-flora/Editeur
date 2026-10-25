@@ -108,3 +108,12 @@ class Document:
             ok = op.length > 0 and 0 <= op.pos and op.pos + op.length <= len(texte)
         if not ok:
             raise ValueError(f"operation invalide : {op}")
+
+    def instantane(self):
+        """Texte et version, lus de facon coherente (sous le verrou)."""
+        with self._verrou:
+            return self.texte, len(self.journal)
+
+    def journal_depuis(self, version):
+        with self._verrou:
+            return list(self.journal[version:]), len(self.journal)

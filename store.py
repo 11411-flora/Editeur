@@ -110,3 +110,18 @@ def lire_credit(email, jour=None):
         TableName=TABLE_CREDITS, Key=_cle_credit(email, jour), ConsistentRead=True
     )
     return int(r["Item"]["utilises"]["N"]) if "Item" in r else 0
+
+
+def rembourser_credit(email, n, jour=None):
+    """Rend n caracteres au credit du jour (sans jamais descendre sous 0)."""
+    try:
+        dynamo.update_item(
+            TableName=TABLE_CREDITS,
+            Key=_cle_credit(email, jour),
+            UpdateExpression="SET utilises = utilises - :n",
+            ConditionExpression="attribute_exists(utilises) AND utilises >= :n",
+            ExpressionAttributeValues={":n": {"N": str(n)}},
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            raise

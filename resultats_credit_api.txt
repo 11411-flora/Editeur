@@ -1,0 +1,5 @@
+OK  20 appareils : 16266 caracteres demandes, 10000 acceptes, jamais plus de 10 000
+OK  credit vide exactement, puis refus 429 ; supprimer reste gratuit
+OK  un autre redacteur n'est pas touche
+OK  une modification invalide ne coute rien
+duree : 0.1 s
