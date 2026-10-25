@@ -1,0 +1,9 @@
+mode                   : naif
+lien                   : test-6b2193cd
+autorises a la creation: 500
+visiteurs              : 1000
+telechargements donnes : 1000
+refus ('epuise')       : 0
+restants en base       : 441
+duree                  : 4.3 s
+VERDICT                : ECHEC

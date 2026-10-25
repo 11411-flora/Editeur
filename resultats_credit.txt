@@ -1,0 +1,7 @@
+caracteres demandes    : 45668
+caracteres acceptes    : 10000
+utilises en base       : 10000
+duree                  : 1.1 s
+OK  jamais plus que 10 000, et la base correspond a ce qui a ete accepte
+OK  credit epuise exactement, puis refus
+OK  recharge : un autre jour repart de zero
