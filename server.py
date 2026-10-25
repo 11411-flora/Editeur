@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import threading
@@ -7,9 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse, Response
-from pydantic import BaseModel, Field
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field, ValidationError
 
 import blocage as blocage_mod
 import credit as credit_mod
@@ -21,6 +23,8 @@ from doc import Document, dele, ins
 
 log = logging.getLogger("editeur")
 app = FastAPI(title="Editeur de documents partage")
+
+DOSSIER = os.path.dirname(os.path.abspath(__file__))
 
 # Un seul processus : cet etat est donc unique. (A remplacer par DynamoDB.)
 DOCUMENTS = {}
@@ -36,6 +40,8 @@ TICKETS = {}         # ticket -> {"cle": cle du PDF, "doc_id": document}
 EN_COURS = {}        # fabrications de PDF en cours : cle -> travail
 VERROU_PDF = threading.Lock()
 POOL = ThreadPoolExecutor(max_workers=2)    # les "travailleurs" qui fabriquent les PDF
+
+SALLES = {}          # doc_id -> ensemble des connexions temps reel ouvertes sur ce document
 
 
 # ---------------------------------------------------------------- modeles
@@ -86,6 +92,16 @@ def _admin(x_admin_token):
         raise HTTPException(403, "Jeton d'administration invalide")
 
 
+# ---------------------------------------------------------------- pages
+
+@app.get("/", include_in_schema=False)
+def page_accueil():
+    return FileResponse(os.path.join(DOSSIER, "static", "index.html"))
+
+
+app.mount("/static", StaticFiles(directory=os.path.join(DOSSIER, "static")), name="static")
+
+
 # ---------------------------------------------------------------- credit
 
 @app.get("/credit")
@@ -102,6 +118,15 @@ def mon_credit(x_email: str = Header(default="")):
 
 
 # ---------------------------------------------------------------- documents
+
+@app.get("/documents")
+def lister_documents(x_email: str = Header(default="")):
+    email = _email(x_email)
+    return {"documents": [
+        {"id": doc_id, "titre": e["titre"], "createur": e["createur"]}
+        for doc_id, e in DOCUMENTS.items() if email in e["membres"]
+    ]}
+
 
 @app.post("/documents", status_code=201)
 def creer_document(corps: NouveauDocument, x_email: str = Header(default="")):
@@ -134,12 +159,9 @@ def lire_document(doc_id: str, x_email: str = Header(default="")):
     return {"id": doc_id, "titre": entree["titre"], "texte": texte, "version": version}
 
 
-@app.post("/documents/{doc_id}/ops")
-def soumettre(doc_id: str, corps: Soumission, x_email: str = Header(default="")):
-    email = _email(x_email)
-    entree = _document(doc_id, email)
-
-    # deja bloque ? on repond tout de suite, sans toucher au credit
+def _traiter_op(entree, email, corps):
+    """Le coeur de l'ecriture : blocage, credit, ordre des modifications.
+    Renvoie {version, ops, credit_restant} ou leve une HTTPException."""
     reste = BLOCAGE.reste(email)
     if reste > 0:
         raise HTTPException(
@@ -152,6 +174,9 @@ def soumettre(doc_id: str, corps: Soumission, x_email: str = Header(default=""))
     if o.kind == "ins":
         if o.text == "":
             raise HTTPException(422, "ins : text ne peut pas etre vide")
+        if any(ord(ch) > 0xFFFF for ch in o.text):
+            # JavaScript compte ces caracteres (emoji...) en double : positions decalees
+            raise HTTPException(422, "ins : caracteres hors plan multilingue de base non pris en charge")
         op = ins(o.pos, o.text)
         cout = len(o.text)          # inserer coute 1 par caractere
     else:
@@ -187,14 +212,21 @@ def soumettre(doc_id: str, corps: Soumission, x_email: str = Header(default=""))
             CREDIT.rembourser(email, cout, jour)         # erreur : on rend les caracteres
         raise HTTPException(422, str(e))
 
-    restant = CREDIT.limite - CREDIT.utilises(email, jour)
     entree["derniere_activite"] = time.time()
+    restant = CREDIT.limite - CREDIT.utilises(email, jour)
     # "ops" peut etre vide : tout ce que tu supprimais l'etait deja
-    return {
-        "version": version,
-        "ops": [asdict(a) for a in acceptees],
-        "credit_restant": restant,
-    }
+    return {"version": version, "ops": [asdict(a) for a in acceptees], "credit_restant": restant}
+
+
+@app.post("/documents/{doc_id}/ops")
+async def soumettre(doc_id: str, corps: Soumission, x_email: str = Header(default="")):
+    # "async" voulu : tout se passe dans le meme fil que les connexions temps reel,
+    # donc l'ordre des messages envoyes est toujours celui du journal.
+    email = _email(x_email)
+    entree = _document(doc_id, email)
+    res = _traiter_op(entree, email, corps)
+    _publier(doc_id, email, res, auteur=None)
+    return res
 
 
 @app.get("/documents/{doc_id}/ops")
@@ -203,6 +235,111 @@ def lire_ops(doc_id: str, depuis: int = 0, x_email: str = Header(default="")):
     depuis = max(0, depuis)
     ops, version = entree["doc"].journal_depuis(depuis)
     return {"depuis": depuis, "version": version, "ops": [asdict(o) for o in ops]}
+
+
+# ---------------------------------------------------------------- temps reel (WebSocket)
+
+class Connexion:
+    def __init__(self, ws, email, nom):
+        self.ws = ws
+        self.email = email
+        self.nom = nom
+        self.id = uuid.uuid4().hex[:6]
+        self.curseur = 0
+        self.file = asyncio.Queue()      # messages a envoyer, dans l'ordre
+
+
+def _decaler_curseur(c, op):
+    if op["kind"] == "ins":
+        return c + len(op["text"]) if op["pos"] <= c else c
+    p, n = op["pos"], op["length"]
+    if c <= p:
+        return c
+    return c - n if c >= p + n else p
+
+
+def _publier(doc_id, email, res, auteur):
+    """Envoie le resultat d'une modification acceptee : un accuse a l'auteur
+    (la connexion qui l'a envoyee), les operations aux autres connexions."""
+    salle = SALLES.get(doc_id, ())
+    for c in salle:
+        for o in res["ops"]:
+            c.curseur = _decaler_curseur(c.curseur, o)
+        if c is auteur:
+            c.file.put_nowait({"type": "ack", "version": res["version"], "ops": res["ops"],
+                               "credit_restant": res["credit_restant"]})
+        elif res["ops"]:
+            c.file.put_nowait({"type": "ops", "version": res["version"], "auteur": email,
+                               "ops": res["ops"]})
+
+
+def _diffuser_presence(doc_id):
+    salle = SALLES.get(doc_id, ())
+    msg = {"type": "presence", "utilisateurs": [
+        {"id": c.id, "email": c.email, "nom": c.nom, "curseur": c.curseur} for c in salle]}
+    for c in salle:
+        c.file.put_nowait(msg)
+
+
+async def _envoyeur(conn):
+    try:
+        while True:
+            await conn.ws.send_json(await conn.file.get())
+    except Exception:
+        return
+
+
+@app.websocket("/documents/{doc_id}/live")
+async def temps_reel(ws: WebSocket, doc_id: str, email: str = "", nom: str = ""):
+    email = email.strip().lower()
+    entree = DOCUMENTS.get(doc_id)
+    if "@" not in email or entree is None or email not in entree["membres"]:
+        await ws.close(code=4403)
+        return
+    await ws.accept()
+
+    conn = Connexion(ws, email, (nom or email)[:60])
+    SALLES.setdefault(doc_id, set()).add(conn)
+    texte, version = entree["doc"].instantane()
+    conn.file.put_nowait({"type": "etat", "texte": texte, "version": version})
+    _diffuser_presence(doc_id)
+    envoi = asyncio.create_task(_envoyeur(conn))
+    try:
+        while True:
+            try:
+                data = await ws.receive_json()
+            except ValueError:
+                conn.file.put_nowait({"type": "erreur", "code": 400, "detail": "JSON invalide"})
+                continue
+            if not isinstance(data, dict):
+                continue
+            genre = data.get("type")
+            if genre == "op":
+                try:
+                    corps = Soumission.model_validate({"base": data.get("base"), "op": data.get("op")})
+                    res = _traiter_op(entree, email, corps)
+                except ValidationError:
+                    conn.file.put_nowait({"type": "erreur", "code": 422, "detail": "requete invalide"})
+                except HTTPException as e:
+                    conn.file.put_nowait({"type": "erreur", "code": e.status_code, "detail": e.detail})
+                else:
+                    _publier(doc_id, email, res, auteur=conn)
+            elif genre == "curseur":
+                try:
+                    texte, _ = entree["doc"].instantane()
+                    conn.curseur = max(0, min(int(data.get("pos", 0)), len(texte)))
+                except (TypeError, ValueError):
+                    continue
+                _diffuser_presence(doc_id)
+            elif genre == "sync":
+                texte, version = entree["doc"].instantane()
+                conn.file.put_nowait({"type": "etat", "texte": texte, "version": version})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        SALLES.get(doc_id, set()).discard(conn)
+        envoi.cancel()
+        _diffuser_presence(doc_id)
 
 
 # ---------------------------------------------------------------- liens de telechargement
@@ -343,13 +480,15 @@ def admin_etat(x_admin_token: str = Header(default="")):
     for doc_id, e in list(DOCUMENTS.items()):
         _, version = e["doc"].instantane()
         depuis = int(maintenant - e["derniere_activite"])
+        connectes = len(SALLES.get(doc_id, ()))
         documents.append({
             "id": doc_id,
             "titre": e["titre"],
             "createur": e["createur"],
             "membres": len(e["membres"]),
             "version": version,
-            "actif": depuis < 300,          # modifie depuis moins de 5 minutes
+            "connectes": connectes,
+            "actif": connectes > 0 or depuis < 300,   # ouvert ou modifie depuis moins de 5 minutes
             "secondes_depuis_activite": depuis,
         })
 

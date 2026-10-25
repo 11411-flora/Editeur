@@ -1,0 +1,7 @@
+OK  connexion refusee : non-membre, document inconnu, e-mail invalide
+OK  a la connexion : etat du document + liste des presents (Camille, Paul)
+OK  l'auteur recoit un accuse (ack), l'autre redacteur recoit les operations
+OK  une modification envoyee par l'API HTTP apparait en temps reel chez les connectes
+OK  la position du curseur de Paul est diffusee
+OK  erreurs (429 credit, 422 version, 400 JSON) renvoyees ; 'sync' redonne l'etat officiel
+OK  30 redacteurs connectes x 8 modifications chacun, au meme document : aucune perdue, tous voient le meme texte (240 caracteres)

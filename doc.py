@@ -4,10 +4,10 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Op:
-    kind: str          # "ins" (inserer) ou "del" (supprimer)
+    kind: str
     pos: int
-    text: str = ""     # pour "ins"
-    length: int = 0    # pour "del"
+    text: str = ""
+    length: int = 0
 
 
 def ins(pos, text):
@@ -24,14 +24,11 @@ def appliquer(texte, op):
     return texte[:op.pos] + texte[op.pos + op.length:]
 
 
-def transformer(op, autre):
-    """op et autre ont ete ecrites sur le MEME texte, et autre est deja
-    appliquee. Renvoie la liste d'operations equivalentes a op, valables
-    APRES autre."""
+def transformer(op, autre, autre_gagne=True):
     if op.kind == "ins":
         if autre.kind == "ins":
-            # meme position : celui arrive en premier passe devant
-            p = op.pos + len(autre.text) if autre.pos <= op.pos else op.pos
+            decale = autre.pos <= op.pos if autre_gagne else autre.pos < op.pos
+            p = op.pos + len(autre.text) if decale else op.pos
             return [ins(p, op.text)]
         a, n = autre.pos, autre.length
         if op.pos <= a:
@@ -39,18 +36,15 @@ def transformer(op, autre):
         elif op.pos >= a + n:
             p = op.pos - n
         else:
-            p = a            # on inserait dans une zone supprimee
+            p = a
         return [ins(p, op.text)]
 
-    # op est une suppression
     if autre.kind == "ins":
         q, u = autre.pos, len(autre.text)
         if q <= op.pos:
             return [dele(op.pos + u, op.length)]
         if q >= op.pos + op.length:
             return [op]
-        # insertion au milieu de la zone : on coupe en deux pour
-        # ne PAS supprimer le texte de l'autre
         gauche = q - op.pos
         return [dele(op.pos, gauche),
                 dele(op.pos + u, op.length - gauche)]
@@ -70,28 +64,43 @@ def transformer(op, autre):
     return [dele(nouvelle, reste)]
 
 
+def croiser(a, b):
+    """a et b : deux listes d'operations ecrites sur le MEME texte (chaque liste
+    est une suite : la 2e operation suppose la 1re deja faite).
+    "a" est passee en premier et gagne les egalites.
+    Renvoie (a2, b2) avec :  b puis a2  ==  a puis b2."""
+    if not a or not b:
+        return a, b
+    if len(a) > 1:
+        a1, b1 = croiser(a[:1], b)
+        a2, b2 = croiser(a[1:], b1)
+        return a1 + a2, b2
+    if len(b) > 1:
+        a1, b1 = croiser(a, b[:1])
+        a2, b2 = croiser(a1, b[1:])
+        return a2, b1 + b2
+    x, y = a[0], b[0]
+    return transformer(x, y, False), transformer(y, x, True)
+
+
 class Document:
     def __init__(self, texte=""):
         self.texte = texte
-        self.journal = []                 # la version = len(journal)
-        self._verrou = threading.Lock()   # un seul guichet
+        self.journal = []
+        self._verrou = threading.Lock()
 
     @property
     def version(self):
         return len(self.journal)
 
     def soumettre(self, op, version_de_base):
-        """op a ete ecrite par un rediacteur qui voyait la version
-        version_de_base. Renvoie (operations_acceptees, nouvelle_version)."""
         with self._verrou:
             if not 0 <= version_de_base <= len(self.journal):
                 raise ValueError("version inconnue")
             ops = [op]
             for deja in self.journal[version_de_base:]:
-                suite = []
-                for o in ops:
-                    suite.extend(transformer(o, deja))
-                ops = suite
+                # deja est passee avant nous : elle gagne les egalites
+                _, ops = croiser([deja], ops)
             texte = self.texte
             for o in ops:
                 self._verifier(o, texte)
@@ -110,7 +119,6 @@ class Document:
             raise ValueError(f"operation invalide : {op}")
 
     def instantane(self):
-        """Texte et version, lus de facon coherente (sous le verrou)."""
         with self._verrou:
             return self.texte, len(self.journal)
 

@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Éditeur de documents partagé</title>
+<style>
+  :root { --fond:#f7f7f4; --carte:#ffffff; --texte:#1d1d1b; --doux:#6b6b66; --trait:#d9d9d2;
+          --accent:#1f5fbf; --alerte:#b3261e; --ok:#1b7a3d; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fond:#161615; --carte:#212120; --texte:#ececE8; --doux:#a5a59d; --trait:#3a3a37;
+            --accent:#7aa7f0; --alerte:#ff8a80; --ok:#6ed08d; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:16px/1.45 system-ui, sans-serif; background:var(--fond); color:var(--texte); }
+  header { display:flex; gap:1rem; align-items:center; padding:.7rem 1rem; border-bottom:1px solid var(--trait); background:var(--carte); }
+  header h1 { font-size:1.05rem; margin:0; flex:1; }
+  main { max-width:1100px; margin:1rem auto; padding:0 1rem; }
+  .carte { background:var(--carte); border:1px solid var(--trait); border-radius:10px; padding:1rem; margin-bottom:1rem; }
+  .grille { display:grid; grid-template-columns: 250px 1fr; gap:1rem; }
+  @media (max-width: 800px) { .grille { grid-template-columns: 1fr; } }
+  h2 { font-size:1rem; margin:0 0 .6rem; }
+  input, button, textarea { font:inherit; color:inherit; }
+  input[type=text], input[type=email], input[type=number] { padding:.45rem .6rem; border:1px solid var(--trait); border-radius:7px; background:var(--fond); width:100%; }
+  button { padding:.45rem .8rem; border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:7px; cursor:pointer; }
+  button.secondaire { background:transparent; color:var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  .ligne { display:flex; gap:.5rem; margin:.4rem 0; }
+  .liste button { display:block; width:100%; text-align:left; margin:.25rem 0; background:transparent; color:var(--texte); border-color:var(--trait); }
+  .liste button.actif { border-color:var(--accent); font-weight:600; }
+  textarea { width:100%; min-height:340px; padding:.8rem; border:1px solid var(--trait); border-radius:8px; background:var(--fond); resize:vertical; line-height:1.5; }
+  #bandeau { padding:.55rem .8rem; border-radius:8px; margin-bottom:1rem; display:none; border:1px solid var(--alerte); color:var(--alerte); }
+  #bandeau.info { border-color:var(--ok); color:var(--ok); }
+  .doux { color:var(--doux); font-size:.9rem; }
+  #presence li { margin:.15rem 0; }
+  .point { display:inline-block; width:.6rem; height:.6rem; border-radius:50%; background:var(--ok); margin-right:.4rem; }
+  .barre { height:8px; background:var(--trait); border-radius:5px; overflow:hidden; }
+  .barre > div { height:100%; background:var(--accent); }
+  ul { padding-left:1.1rem; margin:.3rem 0; }
+  code { background:var(--fond); padding:.1rem .3rem; border-radius:4px; word-break:break-all; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Éditeur de documents partagé</h1>
+  <span id="qui" class="doux"></span>
+  <button id="sortir" class="secondaire" hidden>Changer d’identité</button>
+</header>
+
+<main id="vue-entree">
+  <div class="carte" style="max-width:420px; margin:2rem auto;">
+    <h2>Entrer</h2>
+    <p class="doux">Pas de compte : un nom et une adresse e-mail suffisent.</p>
+    <label>Nom<input id="nom" type="text" autocomplete="name"></label>
+    <label>Adresse e-mail<input id="email" type="email" autocomplete="email"></label>
+    <div class="ligne"><button id="entrer">Entrer</button></div>
+    <p id="erreur-entree" class="doux" style="color:var(--alerte)"></p>
+  </div>
+</main>
+
+<main id="vue-app" hidden>
+  <div id="bandeau" role="alert"></div>
+  <div class="grille">
+    <aside>
+      <div class="carte">
+        <h2>Mes documents</h2>
+        <div id="liste" class="liste"></div>
+        <div class="ligne"><input id="titre" type="text" placeholder="Titre du nouveau document"></div>
+        <div class="ligne"><button id="creer">Créer un document</button></div>
+      </div>
+      <div class="carte">
+        <h2>Mon crédit du jour</h2>
+        <div class="barre"><div id="credit-barre" style="width:100%"></div></div>
+        <p id="credit-texte" class="doux" style="margin:.4rem 0 0"></p>
+      </div>
+    </aside>
+
+    <section>
+      <div id="vide" class="carte doux">Choisissez un document, ou créez-en un.</div>
+      <div id="editeur" hidden>
+        <div class="carte">
+          <h2 id="doc-titre"></h2>
+          <textarea id="zone" spellcheck="false" aria-label="Texte du document" disabled></textarea>
+          <p class="doux" id="statut" style="margin:.5rem 0 0"></p>
+        </div>
+        <div class="carte">
+          <h2>Présents</h2>
+          <ul id="presence" style="list-style:none; padding:0"></ul>
+        </div>
+        <div class="carte">
+          <h2>Partager</h2>
+          <div class="ligne"><input id="membre" type="email" placeholder="e-mail du rédacteur à inviter"><button id="inviter">Donner accès</button></div>
+          <h2 style="margin-top:1rem">Lien de téléchargement (PDF)</h2>
+          <div class="ligne"><input id="max" type="number" min="1" value="500" style="max-width:130px"><button id="lien">Créer le lien</button></div>
+          <div id="liens"></div>
+          <p class="doux">Le lien donne toujours le document tel qu’il est au moment du téléchargement.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script src="/static/ot.js"></script>
+<script src="/static/client.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const LIMITE = 10000;
+let moi = null;          // { nom, email }
+let courant = null;      // { id, titre, ws, client }
+
+// ------------------------------------------------------------ utilitaires
+
+function bandeau(texte, info) {
+  const b = $("bandeau");
+  b.textContent = texte || "";
+  b.className = info ? "info" : "";
+  b.style.display = texte ? "block" : "none";
+}
+
+async function api(methode, chemin, corps) {
+  const r = await fetch(chemin, {
+    method: methode,
+    headers: { "X-Email": moi.email, "Content-Type": "application/json" },
+    body: corps ? JSON.stringify(corps) : undefined,
+  });
+  let json = null;
+  try { json = await r.json(); } catch (e) { /* pas de corps */ }
+  return { statut: r.status, json: json };
+}
+
+function messageErreur(statut, detail) {
+  if (detail && typeof detail === "object") {
+    if (detail.erreur === "credit_epuise")
+      return "Crédit du jour épuisé (il vous reste " + detail.restant + " caractères). Le texte refusé a été retiré.";
+    if (detail.erreur === "bloque")
+      return "Trop d’essais après l’épuisement de votre crédit : écriture bloquée pendant " + detail.reessayer_dans_s + " s.";
+  }
+  return "Erreur " + statut + (typeof detail === "string" ? " : " + detail : "");
+}
+
+function majCredit(restant) {
+  const utilise = LIMITE - restant;
+  $("credit-barre").style.width = Math.max(0, Math.min(100, restant / LIMITE * 100)) + "%";
+  $("credit-texte").textContent = restant + " caractères restants sur " + LIMITE + " (utilisés : " + utilise + ")";
+}
+
+async function chargerCredit() {
+  const r = await api("GET", "/credit");
+  if (r.statut === 200) majCredit(r.json.restant);
+}
+
+// ------------------------------------------------------------ identite
+
+function afficherApp() {
+  $("vue-entree").hidden = true;
+  $("vue-app").hidden = false;
+  $("sortir").hidden = false;
+  $("qui").textContent = moi.nom + " · " + moi.email;
+  chargerDocuments();
+  chargerCredit();
+}
+
+$("entrer").onclick = () => {
+  const nom = $("nom").value.trim();
+  const email = $("email").value.trim().toLowerCase();
+  if (!nom || !email.includes("@")) { $("erreur-entree").textContent = "Indiquez un nom et une adresse e-mail valide."; return; }
+  moi = { nom: nom, email: email };
+  sessionStorage.setItem("moi", JSON.stringify(moi));
+  afficherApp();
+};
+
+$("sortir").onclick = () => { sessionStorage.removeItem("moi"); location.reload(); };
+
+// ------------------------------------------------------------ documents
+
+async function chargerDocuments() {
+  const r = await api("GET", "/documents");
+  const zone = $("liste");
+  zone.replaceChildren();
+  if (r.statut !== 200) return;
+  for (const d of r.json.documents) {
+    const b = document.createElement("button");
+    b.textContent = d.titre;
+    b.dataset.id = d.id;
+    if (courant && courant.id === d.id) b.className = "actif";
+    b.onclick = () => ouvrir(d.id, d.titre);
+    zone.appendChild(b);
+  }
+}
+
+$("creer").onclick = async () => {
+  const titre = $("titre").value.trim();
+  if (!titre) return;
+  const r = await api("POST", "/documents", { titre: titre });
+  if (r.statut !== 201) { bandeau(messageErreur(r.statut, r.json && r.json.detail)); return; }
+  $("titre").value = "";
+  await ouvrir(r.json.id, titre);
+};
+
+// ------------------------------------------------------------ edition en temps reel
+
+function decaler(c, op) {          // ou va mon curseur quand quelqu'un d'autre modifie le texte ?
+  if (op.kind === "ins") return op.pos < c ? c + op.text.length : c;
+  if (c <= op.pos) return c;
+  return c >= op.pos + op.length ? c - op.length : op.pos;
+}
+
+function surSaisie() {
+  if (!courant) return;
+  const zone = $("zone");
+  // les caracteres hors plan multilingue (emoji) sont comptes differemment par JavaScript et par le serveur
+  if (/[\ud800-\udfff]/.test(zone.value)) {
+    const debut = zone.selectionStart;
+    zone.value = zone.value.replace(/[\ud800-\udfff]/g, "");
+    zone.selectionStart = zone.selectionEnd = Math.min(debut, zone.value.length);
+    bandeau("Les emojis et caractères rares ne sont pas pris en charge.");
+  }
+  const ancien = courant.client.texte, nouveau = zone.value;
+  if (ancien === nouveau) return;
+  const max = Math.min(ancien.length, nouveau.length);
+  let p = 0;
+  while (p < max && ancien[p] === nouveau[p]) p++;
+  let s = 0;
+  while (s < max - p && ancien[ancien.length - 1 - s] === nouveau[nouveau.length - 1 - s]) s++;
+  const supprime = ancien.length - p - s;
+  const ajoute = nouveau.slice(p, nouveau.length - s);
+  if (supprime > 0) courant.client.local(OT.del(p, supprime));
+  if (ajoute.length > 0) courant.client.local(OT.ins(p, ajoute));
+  statut();
+}
+
+function statut() {
+  if (!courant) return;
+  const c = courant.client;
+  const attente = (c.enAttente ? 1 : 0) + c.tampon.length;
+  $("statut").textContent = "Version " + c.version + " · " + (attente ? "envoi en cours…" : "tout est enregistré");
+}
+
+function afficherPresence(msg) {
+  const ul = $("presence");
+  ul.replaceChildren();
+  for (const u of msg.utilisateurs) {
+    const li = document.createElement("li");
+    const point = document.createElement("span");
+    point.className = "point";
+    li.appendChild(point);
+    const t = (u.nom || u.email) + (u.email === moi.email ? " (vous)" : "") + " · écrit à la position " + u.curseur;
+    li.appendChild(document.createTextNode(t));
+    ul.appendChild(li);
+  }
+}
+
+let dernierCurseur = 0;
+function envoyerCurseur() {
+  if (!courant || courant.ws.readyState !== 1) return;
+  const maintenant = Date.now();
+  if (maintenant - dernierCurseur < 250) return;       // au plus 4 fois par seconde
+  dernierCurseur = maintenant;
+  courant.ws.send(JSON.stringify({ type: "curseur", pos: $("zone").selectionStart }));
+}
+
+async function ouvrir(id, titre) {
+  if (courant) { courant.ws.onclose = null; courant.ws.close(); courant = null; }
+  bandeau("");
+  $("vide").hidden = true;
+  $("editeur").hidden = false;
+  $("doc-titre").textContent = titre;
+  const zone = $("zone");
+  zone.value = "";
+  zone.disabled = true;
+  $("presence").replaceChildren();
+  $("liens").replaceChildren();
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(proto + "//" + location.host + "/documents/" + id + "/live?email=" +
+                           encodeURIComponent(moi.email) + "&nom=" + encodeURIComponent(moi.nom));
+  const client = new ClientCollab((m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); }, {
+    surEtat: (msg) => { zone.value = msg.texte; zone.disabled = false; statut(); },
+    surOps: (ops) => {
+      let a = zone.selectionStart, b = zone.selectionEnd;
+      for (const o of ops) { a = decaler(a, o); b = decaler(b, o); }
+      zone.value = client.texte;
+      zone.selectionStart = a; zone.selectionEnd = b;
+      statut();
+    },
+    surAck: (msg) => { if (msg.credit_restant !== undefined) majCredit(msg.credit_restant); },
+    surErreur: (msg) => { bandeau(messageErreur(msg.code, msg.detail)); chargerCredit(); },
+    surPresence: afficherPresence,
+  });
+  // statut mis a jour apres chaque accuse de reception
+  const recevoirOriginal = client.recevoir.bind(client);
+  client.recevoir = (m) => { recevoirOriginal(m); if (m.type === "ack") statut(); };
+
+  ws.onmessage = (e) => client.recevoir(JSON.parse(e.data));
+  ws.onclose = () => { zone.disabled = true; bandeau("Connexion perdue : rechargez la page pour reprendre."); };
+  courant = { id: id, titre: titre, ws: ws, client: client };
+  chargerDocuments();
+}
+
+$("zone").addEventListener("input", surSaisie);
+for (const ev of ["keyup", "click", "select"]) $("zone").addEventListener(ev, envoyerCurseur);
+
+// ------------------------------------------------------------ partage et liens
+
+$("inviter").onclick = async () => {
+  if (!courant) return;
+  const email = $("membre").value.trim();
+  if (!email) return;
+  const r = await api("POST", "/documents/" + courant.id + "/membres", { email: email });
+  if (r.statut === 201) { bandeau(email + " a maintenant accès à ce document.", true); $("membre").value = ""; }
+  else bandeau(messageErreur(r.statut, r.json && r.json.detail));
+};
+
+$("lien").onclick = async () => {
+  if (!courant) return;
+  const max = parseInt($("max").value, 10);
+  if (!(max >= 1)) return;
+  const r = await api("POST", "/documents/" + courant.id + "/liens", { max_telechargements: max });
+  if (r.statut !== 201) { bandeau(messageErreur(r.statut, r.json && r.json.detail)); return; }
+  const url = location.origin + r.json.url;
+  const p = document.createElement("p");
+  p.appendChild(document.createTextNode("Lien (" + max + " téléchargements) : "));
+  const code = document.createElement("code");
+  code.textContent = url;
+  p.appendChild(code);
+  $("liens").prepend(p);
+};
+
+// ------------------------------------------------------------ demarrage
+
+try { moi = JSON.parse(sessionStorage.getItem("moi") || "null"); } catch (e) { moi = null; }
+if (moi && moi.email) afficherApp();
+</script>
+</body>
+</html>
