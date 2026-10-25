@@ -125,3 +125,49 @@ def rembourser_credit(email, n, jour=None):
     except ClientError as e:
         if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
             raise
+
+
+# ---------------- Liens de telechargement complets ----------------
+
+def creer_lien_complet(lien_id, doc_id, createur, maximum):
+    dynamo.put_item(
+        TableName=TABLE_LIENS,
+        Item={
+            "lien_id": {"S": lien_id},
+            "doc_id": {"S": doc_id},
+            "createur": {"S": createur},
+            "maximum": {"N": str(maximum)},
+            "restants": {"N": str(maximum)},
+        },
+        ConditionExpression="attribute_not_exists(lien_id)",
+    )
+
+
+def _lien_depuis_item(item):
+    return {
+        "lien_id": item["lien_id"]["S"],
+        "doc_id": item.get("doc_id", {}).get("S", ""),
+        "createur": item.get("createur", {}).get("S", ""),
+        "maximum": int(item.get("maximum", {}).get("N", "0")),
+        "restants": int(item["restants"]["N"]),
+    }
+
+
+def lire_lien(lien_id):
+    r = dynamo.get_item(
+        TableName=TABLE_LIENS, Key={"lien_id": {"S": lien_id}}, ConsistentRead=True
+    )
+    return _lien_depuis_item(r["Item"]) if "Item" in r else None
+
+
+def lister_liens():
+    liens, depart = [], None
+    while True:
+        params = {"TableName": TABLE_LIENS}
+        if depart:
+            params["ExclusiveStartKey"] = depart
+        r = dynamo.scan(**params)
+        liens += [_lien_depuis_item(i) for i in r["Items"]]
+        depart = r.get("LastEvaluatedKey")
+        if not depart:
+            return liens

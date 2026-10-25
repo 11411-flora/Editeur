@@ -1,0 +1,6 @@
+OK  lien de 500, 1500 visiteurs : 500 PDF livres, 1000 'epuise'
+    reponses initiales : 499 'maintenant', 1 'patiente', 1000 'epuise'
+    duree totale : 1.1 s ; reponse 'epuise' apres coup : 1 ms en moyenne
+OK  le meme lien donne le document tel qu'il est au moment du clic
+OK  exactement un e-mail au createur, au dernier telechargement
+OK  lien inconnu (404), intrus (403), nombre invalide (422)
