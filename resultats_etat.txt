@@ -1,0 +1,5 @@
+OK  sans jeton d'administration : acces refuse (403)
+OK  le document apparait, actif, version 1
+OK  le lien actif montre 1 telechargement restant (2 faits sur 3)
+OK  une fois epuise, le lien quitte la liste des liens actifs
+OK  la personne bloquee apparait avec son temps restant (599 s)

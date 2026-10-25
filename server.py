@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
@@ -111,6 +112,7 @@ def creer_document(corps: NouveauDocument, x_email: str = Header(default="")):
         "titre": corps.titre,
         "createur": email,
         "membres": {email},
+        "derniere_activite": time.time(),
     }
     return {"id": doc_id, "version": 0}
 
@@ -186,6 +188,7 @@ def soumettre(doc_id: str, corps: Soumission, x_email: str = Header(default=""))
         raise HTTPException(422, str(e))
 
     restant = CREDIT.limite - CREDIT.utilises(email, jour)
+    entree["derniere_activite"] = time.time()
     # "ops" peut etre vide : tout ce que tu supprimais l'etait deja
     return {
         "version": version,
@@ -329,3 +332,50 @@ def admin_bloques(x_admin_token: str = Header(default="")):
 def admin_notifications(x_admin_token: str = Header(default="")):
     _admin(x_admin_token)
     return {"notifications": NOTIF.liste()}
+
+
+@app.get("/admin/etat")
+def admin_etat(x_admin_token: str = Header(default="")):
+    _admin(x_admin_token)
+    maintenant = time.time()
+
+    documents = []
+    for doc_id, e in list(DOCUMENTS.items()):
+        _, version = e["doc"].instantane()
+        depuis = int(maintenant - e["derniere_activite"])
+        documents.append({
+            "id": doc_id,
+            "titre": e["titre"],
+            "createur": e["createur"],
+            "membres": len(e["membres"]),
+            "version": version,
+            "actif": depuis < 300,          # modifie depuis moins de 5 minutes
+            "secondes_depuis_activite": depuis,
+        })
+
+    tous_les_liens = LIENS.lister()
+    liens_actifs = [
+        {
+            "id": l["lien_id"],
+            "document": l["doc_id"],
+            "createur": l["createur"],
+            "maximum": l["maximum"],
+            "restants": l["restants"],
+            "telechargements_faits": l["maximum"] - l["restants"],
+        }
+        for l in tous_les_liens if l["restants"] > 0
+    ]
+
+    return {
+        "documents": {
+            "total": len(documents),
+            "actifs": sum(1 for d in documents if d["actif"]),
+            "liste": documents,
+        },
+        "liens": {
+            "actifs": liens_actifs,
+            "epuises": sum(1 for l in tous_les_liens if l["restants"] <= 0),
+        },
+        "bloques": BLOCAGE.liste(),
+        "pdf_en_cours_de_fabrication": len(EN_COURS),
+    }
