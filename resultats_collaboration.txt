@@ -1,0 +1,4 @@
+OK  scenario classique (suppression coupee, texte de Paul conserve)
+OK  300 redacteurs au meme endroit : aucune modification perdue
+OK  5000 operations aleatoires avec redacteurs en retard (5005 versions)
+duree : 0.10 s
