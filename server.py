@@ -8,8 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from typing import Literal
 
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
@@ -237,6 +237,59 @@ def lire_ops(doc_id: str, depuis: int = 0, x_email: str = Header(default="")):
     return {"depuis": depuis, "version": version, "ops": [asdict(o) for o in ops]}
 
 
+class Restauration(BaseModel):
+    version: int = Field(ge=0)
+
+
+@app.get("/documents/{doc_id}/versions")
+def lister_versions(doc_id: str, x_email: str = Header(default="")):
+    entree = _document(doc_id, _email(x_email))
+    _, courante = entree["doc"].instantane()
+    # chaque modification accepte cree une version : 0 (vide) jusqu'a "courante"
+    return {"courante": courante, "consultables": f"0 a {courante}",
+            "recentes": list(range(max(0, courante - 49), courante + 1))}
+
+
+@app.get("/documents/{doc_id}/versions/{numero}")
+def lire_version(doc_id: str, numero: int, x_email: str = Header(default="")):
+    entree = _document(doc_id, _email(x_email))
+    try:
+        texte = entree["doc"].texte_a(numero)
+    except ValueError:
+        raise HTTPException(404, "Version inconnue")
+    return {"version": numero, "texte": texte}
+
+
+@app.post("/documents/{doc_id}/restaurer")
+async def restaurer_version(doc_id: str, corps: Restauration, x_email: str = Header(default="")):
+    email = _email(x_email)
+    entree = _document(doc_id, email)
+    reste = BLOCAGE.reste(email)
+    if reste > 0:
+        raise HTTPException(429, detail={"erreur": "bloque", "reessayer_dans_s": int(reste) + 1},
+                            headers={"Retry-After": str(int(reste) + 1)})
+    try:
+        ancien = entree["doc"].texte_a(corps.version)
+    except ValueError:
+        raise HTTPException(404, "Version inconnue")
+    jour = credit_mod.jour_utc()
+    cout = len(ancien)                  # restaurer = reecrire le texte : meme prix qu'une insertion
+    if cout > 0 and CREDIT.consommer(email, cout, jour) is None:
+        restant = CREDIT.limite - CREDIT.utilises(email, jour)
+        raise HTTPException(429, detail={"erreur": "credit_epuise", "demande": cout, "restant": restant})
+    try:
+        acceptees, version, _ = entree["doc"].restaurer(corps.version)
+    except ValueError as e:
+        if cout > 0:
+            CREDIT.rembourser(email, cout, jour)
+        raise HTTPException(422, str(e))
+    entree["derniere_activite"] = time.time()
+    res = {"version": version, "ops": [asdict(a) for a in acceptees],
+           "credit_restant": CREDIT.limite - CREDIT.utilises(email, jour), "restaure": corps.version}
+    _publier(doc_id, email, res, auteur=None)
+    return res
+
+
 # ---------------------------------------------------------------- temps reel (WebSocket)
 
 class Connexion:
@@ -378,7 +431,25 @@ def _servir(cle, doc_id):
     )
 
 
-def _patiente(ticket):
+def _veut_html(request):
+    return "text/html" in request.headers.get("accept", "")
+
+
+def _page(titre, message, statut, rafraichir=None):
+    refresh = f'<meta http-equiv="refresh" content="1;url={rafraichir}">' if rafraichir else ""
+    return HTMLResponse(
+        f'<!doctype html><html lang="fr"><head><meta charset="utf-8">{refresh}'
+        f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{titre}</title></head>'
+        f'<body style="font:18px system-ui;max-width:34rem;margin:4rem auto;padding:0 1rem">'
+        f'<h1>{titre}</h1><p>{message}</p></body></html>', status_code=statut)
+
+
+def _patiente(ticket, request=None):
+    if request is not None and _veut_html(request):
+        return _page("Votre exemplaire est r\u00e9serv\u00e9",
+                     "Le PDF est en cours de pr\u00e9paration. Cette page se met \u00e0 jour toute seule : "
+                     "ne la rechargez pas, cela consommerait un autre exemplaire.",
+                     202, rafraichir=f"/telechargements/{ticket}")
     return JSONResponse(
         status_code=202,
         content={"etat": "patiente", "ticket": ticket, "reessayer_dans_s": 1},
@@ -386,7 +457,9 @@ def _patiente(ticket):
     )
 
 
-def _epuise():
+def _epuise(request=None):
+    if request is not None and _veut_html(request):
+        return _page("Lien \u00e9puis\u00e9", "Ce lien a atteint son nombre maximal de t\u00e9l\u00e9chargements.", 410)
     return JSONResponse(
         status_code=410,
         content={"etat": "epuise", "message": "Ce lien a atteint son nombre maximal de telechargements."},
@@ -407,10 +480,10 @@ def creer_lien(doc_id: str, corps: NouveauLien, x_email: str = Header(default=""
 
 
 @app.get("/liens/{lien_id}")
-def utiliser_lien(lien_id: str):
+def utiliser_lien(lien_id: str, request: Request):
     # 1. On sait deja que c'est epuise : reponse immediate, sans toucher a la base
     if lien_id in EPUISES:
-        return _epuise()
+        return _epuise(request)
 
     info = LIENS.lire(lien_id)
     if info is None:
@@ -423,7 +496,7 @@ def utiliser_lien(lien_id: str):
     restants = LIENS.prendre(lien_id)
     if restants is None:
         EPUISES.add(lien_id)
-        return _epuise()
+        return _epuise(request)
 
     # 3. Un seul visiteur recoit "0" : c'est lui qui declenche l'e-mail
     if restants == 0:
@@ -440,18 +513,18 @@ def utiliser_lien(lien_id: str):
     _lancer_fabrication(cle, entree["titre"], texte)
     ticket = uuid.uuid4().hex
     TICKETS[ticket] = {"cle": cle, "doc_id": info["doc_id"]}
-    return _patiente(ticket)
+    return _patiente(ticket, request)
 
 
 @app.get("/telechargements/{ticket}")
-def retirer_pdf(ticket: str):
+def retirer_pdf(ticket: str, request: Request):
     t = TICKETS.get(ticket)
     if t is None:
         raise HTTPException(404, "Ticket inconnu")
     if STOCK.existe(t["cle"]):
         return _servir(t["cle"], t["doc_id"])
     if t["cle"] in EN_COURS:
-        return _patiente(ticket)
+        return _patiente(ticket, request)
     if STOCK.existe(t["cle"]):               # la fabrication s'est terminee entre-temps
         return _servir(t["cle"], t["doc_id"])
     raise HTTPException(500, "La fabrication du PDF a echoue")

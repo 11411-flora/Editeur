@@ -1,0 +1,5 @@
+OK  chaque version est consultable : '', 'Bonjour', 'Bonjour monde', 'jour monde' ; version inconnue = 404
+OK  restaurer la version 1 : texte 'Bonjour', anciennes versions intactes, nouvelle version 5, credit -7
+OK  restaurer la version 0 vide le document ; version inconnue = 404 ; intrus = 403
+OK  une restauration apparait en temps reel chez les autres connectes
+OK  navigateur : la page se rafraichit seule (un seul exemplaire consomme), puis page 'epuise' lisible ; clients JSON inchanges

@@ -87,6 +87,14 @@
           <ul id="presence" style="list-style:none; padding:0"></ul>
         </div>
         <div class="carte">
+          <h2>Historique</h2>
+          <div class="ligne"><input id="histo-num" type="number" min="0" value="0" style="max-width:130px" aria-label="Numéro de version">
+            <button id="histo-voir" class="secondaire">Voir cette version</button>
+            <button id="histo-restaurer">Restaurer cette version</button></div>
+          <p id="histo-info" class="doux" style="margin:.2rem 0"></p>
+          <pre id="histo-texte" style="white-space:pre-wrap; margin:.3rem 0 0"></pre>
+        </div>
+        <div class="carte">
           <h2>Partager</h2>
           <div class="ligne"><input id="membre" type="email" placeholder="e-mail du rédacteur à inviter"><button id="inviter">Donner accès</button></div>
           <h2 style="margin-top:1rem">Lien de téléchargement (PDF)</h2>
@@ -324,6 +332,27 @@ $("lien").onclick = async () => {
   code.textContent = url;
   p.appendChild(code);
   $("liens").prepend(p);
+};
+
+// ------------------------------------------------------------ historique
+
+$("histo-voir").onclick = async () => {
+  if (!courant) return;
+  const n = parseInt($("histo-num").value, 10);
+  if (!(n >= 0)) return;
+  const r = await api("GET", "/documents/" + courant.id + "/versions/" + n);
+  if (r.statut !== 200) { $("histo-info").textContent = "Cette version n’existe pas."; $("histo-texte").textContent = ""; return; }
+  $("histo-info").textContent = "Version " + n + " (version actuelle : " + courant.client.version + ")";
+  $("histo-texte").textContent = r.json.texte === "" ? "(document vide)" : r.json.texte;
+};
+
+$("histo-restaurer").onclick = async () => {
+  if (!courant) return;
+  const n = parseInt($("histo-num").value, 10);
+  if (!(n >= 0)) return;
+  const r = await api("POST", "/documents/" + courant.id + "/restaurer", { version: n });
+  if (r.statut === 200) { bandeau("Version " + n + " restaurée : l’historique est conservé.", true); majCredit(r.json.credit_restant); }
+  else bandeau(messageErreur(r.statut, r.json && r.json.detail));
 };
 
 // ------------------------------------------------------------ demarrage

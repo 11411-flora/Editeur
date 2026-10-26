@@ -86,6 +86,7 @@ def croiser(a, b):
 class Document:
     def __init__(self, texte=""):
         self.texte = texte
+        self._depart = texte          # texte de depart : sert a rejouer l'historique
         self.journal = []
         self._verrou = threading.Lock()
 
@@ -125,3 +126,32 @@ class Document:
     def journal_depuis(self, version):
         with self._verrou:
             return list(self.journal[version:]), len(self.journal)
+
+    def texte_a(self, version):
+        """Le texte tel qu'il etait a une version donnee (0 = document vide)."""
+        with self._verrou:
+            if not 0 <= version <= len(self.journal):
+                raise ValueError("version inconnue")
+            t = self._depart
+            for o in self.journal[:version]:
+                t = appliquer(t, o)
+            return t
+
+    def restaurer(self, version):
+        """Remet le texte d'une version ancienne en ajoutant de NOUVELLES operations
+        au journal : l'historique n'est jamais reecrit."""
+        with self._verrou:
+            if not 0 <= version <= len(self.journal):
+                raise ValueError("version inconnue")
+            ancien = self._depart
+            for o in self.journal[:version]:
+                ancien = appliquer(ancien, o)
+            ops = []
+            if self.texte:
+                ops.append(dele(0, len(self.texte)))
+            if ancien:
+                ops.append(ins(0, ancien))
+            for o in ops:
+                self.texte = appliquer(self.texte, o)
+            self.journal.extend(ops)
+            return ops, len(self.journal), ancien

@@ -90,6 +90,15 @@ async function entrer(dom, nom, email) {
   verifier(r.status === 200 && (r.headers.get("content-type") || "").includes("pdf"), "le PDF n'est pas livre : " + r.status);
   console.log("OK  le lien affiche donne un PDF :", url);
 
+  // historique : voir la version 1, puis la restaurer ; Paul voit le changement en temps reel
+  dc.getElementById("histo-num").value = "1";
+  dc.getElementById("histo-voir").click();
+  verifier(await jusqua(() => dc.getElementById("histo-texte").textContent === "Bonjour tout le monde"), "la version 1 ne s'affiche pas : " + dc.getElementById("histo-texte").textContent);
+  console.log("OK  historique : la version 1 s'affiche :", JSON.stringify(dc.getElementById("histo-texte").textContent));
+  dc.getElementById("histo-restaurer").click();
+  verifier(await jusqua(() => zc.value === "Bonjour tout le monde" && zp.value === "Bonjour tout le monde"), `restauration : "${zc.value}" / "${zp.value}"`);
+  console.log("OK  restauration de la version 1 : les deux ecrans reviennent a", JSON.stringify(zc.value));
+
   camille.window.close(); paul.window.close();
   process.exit(0);
 })().catch((e) => { console.log("ERREUR", e); process.exit(1); });
