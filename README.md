@@ -60,7 +60,7 @@ Les tests de collaboration envoient des modifications simultanées au même endr
 
 ## Déploiement sur AWS
 
-
+Incident de déploiement sur AWS. Au premier démarrage sur l’instance, le service redémarrait en boucle puis systemd l’abandonnait (« start-limit-hit »). Deux causes successives. D’abord, reportlab refusait de s’importer parce que la version de Python du système était inférieure à 3.10 ; j’ai utilisé un environnement virtuel avec une version suffisante. Ensuite, le service lançait python3 server.py, qui chargeait le fichier puis se terminait sans démarrer de serveur. J’ai remplacé la commande par uvicorn server:app --host 127.0.0.1 --port 8000. Après correction, le service est resté actif sans redémarrage et répond 200 sur le port 8000, puis sur le port 80 via nginx. Je garde cet incident dans le rapport parce qu’il montre que le déploiement a été vérifié et pas seulement supposé.
 
 Aucune clé d'accès AWS n'est dans le code ni dans le dépôt : le serveur utilise le rôle IAM de l'instance.
 
