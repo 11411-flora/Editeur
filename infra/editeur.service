@@ -1,0 +1,16 @@
+[Unit]
+Description=Serveur Editeur Partage
+After=network.target
+
+[Service]
+User=editeur
+Group=editeur
+WorkingDirectory=/opt/editeur
+EnvironmentFile=/etc/editeur.env
+# Un seul processus : il fixe l'ordre des modifications. Ne pas ajouter --workers.
+ExecStart=/opt/editeur/.venv/bin/uvicorn server:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -48,7 +48,6 @@ Navigateur  →  nginx (port 80)  →  uvicorn (127.0.0.1:8000)  →  server.py
 | Groupe de sécurité | Port 80 ouvert à tous, port 22 limité à mon adresse IP | ce README |
 | Service systemd `editeur` | Lance et relance le serveur | `infra/editeur.service` |
 | nginx | Reçoit le port 80, transmet à uvicorn, laisse passer les WebSocket | `infra/nginx-editeur.conf` |
-| [DynamoDB, S3, SQS, SES] | [À compléter avec ce que l'application utilise vraiment. Supprimer cette ligne sinon.] | |
 
 Le serveur d'écriture est volontairement un **seul processus** : c'est lui qui fixe l'ordre des modifications. Ne pas lancer uvicorn avec `--workers`.
 
@@ -148,7 +147,7 @@ node test_page_jsdom.js
 node test_e2e_node.js
 ```
 
-Pour tester l'instance AWS plutôt que mon ordinateur, changer l'adresse cible en tête des scripts (`BASE_URL` ou équivalent) par `http://ADRESSE_IP`.
+Pour tester l'instance AWS plutôt que mon ordinateur, changer l'adresse cible en tête des scripts par `http://ADRESSE_IP`.
 
 - `test_collaboration.py` et `test_ws.py` envoient des modifications simultanées au même endroit et vérifient que le texte final est identique partout et qu'aucune insertion n'a disparu.
 - `test_regression_http.py` vérifie que l'API HTTP répond toujours comme prévu.
@@ -171,26 +170,6 @@ aws ec2 delete-key-pair --key-name NOM_DE_LA_CLE
 
 # Si une IP élastique a été créée
 aws ec2 release-address --allocation-id eipalloc-XXXXXXXX
-```
-
-Si l'application utilise d'autres services, supprimer aussi (retirer les lignes inutiles) :
-
-```
-aws dynamodb delete-table --table-name NOM_TABLE
-aws s3 rm s3://NOM_BUCKET --recursive
-aws s3api delete-bucket --bucket NOM_BUCKET
-aws sqs delete-queue --queue-url URL_DE_LA_FILE
-aws ses delete-identity --identity adresse@exemple.com
-aws budgets delete-budget --account-id ID_COMPTE --budget-name NOM_ALERTE
-```
-
-Rôle IAM de l'instance, s'il existe :
-
-```
-aws iam remove-role-from-instance-profile --instance-profile-name NOM --role-name NOM
-aws iam delete-instance-profile --instance-profile-name NOM
-aws iam delete-role-policy --role-name NOM --policy-name NOM_POLITIQUE
-aws iam delete-role --role-name NOM
 ```
 
 Vérifier qu'il ne reste rien :
